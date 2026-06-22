@@ -113,28 +113,6 @@ class ChineseCangjieConverter:
             output.append("[cj_.]")
         return "".join(output)
 
-
-
-def add_russian_stress(text: str) -> str:
-    """Add stress marks to Russian text."""
-    try:
-        stresser = RussianTextStresser()
-        return stresser.stress_text(text)
-    except Exception as exc:
-        raise RuntimeError("Russian stress labeling failed") from exc
-
-
-def initialize_russian_stresser() -> None:
-    """Install, initialize, and verify Russian stress labeling."""
-    health_check_text = normalize("NFKD", "твои слова ничего не значат.")
-    stressed_text = add_russian_stress(health_check_text)
-    if "\u0301" not in stressed_text:
-        raise RuntimeError(
-            "Russian stresser health check failed: no stress marks were produced"
-        )
-    logger.info("Russian stresser health check passed")
-
-
 class MTLTokenizer:
     def __init__(self, vocab_file_path, text_preproc: str):
         self.tokenizer: Tokenizer = Tokenizer.from_file(vocab_file_path)
