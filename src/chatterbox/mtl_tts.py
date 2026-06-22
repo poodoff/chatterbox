@@ -31,6 +31,7 @@ MULTILINGUAL_T3_MODELS = {
     "v3": "t3_mtl23ls_v3.safetensors",
     "t3_mtl23ls_v3": "t3_mtl23ls_v3.safetensors",
 }
+T3_TEXT_VOCAB_SIZE = 2454
 
 logger = logging.getLogger(__name__)
 _reference_vad_model = None
