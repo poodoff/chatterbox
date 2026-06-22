@@ -13,6 +13,7 @@ from safetensors.torch import load_file as load_safetensors
 from huggingface_hub import snapshot_download
 
 from .models.t3 import T3
+from .models.t3.modules.t3_config import T3ConfigMultilingual
 from .models.t3.modules.t3_config import T3Config
 from .models.s3tokenizer import S3_SR, S3_TOKEN_RATE, drop_invalid_tokens
 from .models.s3gen import S3GEN_SR, S3Gen
@@ -275,9 +276,12 @@ class ChatterboxMultilingualTTS:
             torch.load(ckpt_dir / "ve.pt", map_location=map_location, weights_only=True)
         )
         ve.to(device).eval()
-
-        t3 = T3(T3Config.multilingual())
-        t3_state = load_safetensors(ckpt_dir / t3_model)
+        
+        ###
+        t3_cfg = T3ConfigMultilingual()
+        t3_cfg.text_tokens_dict_size = T3_TEXT_VOCAB_SIZE
+        t3 = T3(t3_cfg)
+        t3_state = load_safetensors(ckpt_dir / t3_filename)
         if "model" in t3_state.keys():
             t3_state = t3_state["model"][0]
         t3.load_state_dict(t3_state)
@@ -285,12 +289,14 @@ class ChatterboxMultilingualTTS:
 
         s3gen = S3Gen()
         s3gen.load_state_dict(
-            torch.load(ckpt_dir / "s3gen.pt", map_location=map_location, weights_only=True)
+            torch.load(ckpt_dir / "s3gen.pt", weights_only=True, map_location="cpu")
         )
         s3gen.to(device).eval()
+        ###
 
         tokenizer = MTLTokenizer(
-            str(ckpt_dir / "grapheme_mtl_merged_expanded_v1.json")
+            str(ckpt_dir / TOKENIZER_FILENAME),
+            text_preproc=t3_cfg.text_preproc,
         )
 
         conds = None
