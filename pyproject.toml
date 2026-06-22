@@ -38,7 +38,8 @@ dependencies = [
     "pymorphy2-dicts-ru>=2.4.417127.4579844",
     "spacy==3.8.11",
     "stressed-cyrillic-tools>=0.1.10",
-    "transliterate>=1.10.2"
+    "transliterate>=1.10.2",
+    "git+https://github.com/Vuizur/add-stress-to-epub.git@9e064c815373ef6f0360dd97b0d0fc37b52d256f"
 ]
 
 [project.urls]
