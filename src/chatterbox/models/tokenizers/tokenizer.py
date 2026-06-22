@@ -11,6 +11,7 @@ import torch
 from huggingface_hub import hf_hub_download
 from tokenizers import Tokenizer
 
+from russian_text_stresser.text_stresser import RussianTextStresser
 
 # Special tokens
 SOT = "[START]"
@@ -21,15 +22,6 @@ SPECIAL_TOKENS = [SOT, EOT, UNK, SPACE, "[PAD]", "[SEP]", "[CLS]", "[MASK]"]
 
 logger = logging.getLogger(__name__)
 
-CANGJIE_FILENAME = "Cangjie5_TC.json"
-CANGJIE_REPO_ID = "ResembleAI/chatterbox"
-RUSSIAN_STRESSER_PACKAGE = (
-    "git+https://github.com/Vuizur/add-stress-to-epub.git"
-    "@9e064c815373ef6f0360dd97b0d0fc37b52d256f"
-)
-RUSSIAN_STRESSER_INSTALL_DIR = Path.home() / ".cache" / "chatterbox" / "russian-text-stresser"
-_russian_stresser_lock = threading.Lock()
-_russian_stresser_local = threading.local()
 
 class EnTokenizer:
     def __init__(self, vocab_file_path):
@@ -122,45 +114,11 @@ class ChineseCangjieConverter:
         return "".join(output)
 
 
-def _load_russian_stresser_class():
-    install_dir = str(RUSSIAN_STRESSER_INSTALL_DIR)
-    if RUSSIAN_STRESSER_INSTALL_DIR.exists() and install_dir not in sys.path:
-        sys.path.insert(0, install_dir)
-
-    try:
-        from russian_text_stresser.text_stresser import RussianTextStresser
-        return RussianTextStresser
-    except ImportError:
-        logger.info("Installing russian_text_stresser for the first Russian request")
-        RUSSIAN_STRESSER_INSTALL_DIR.mkdir(parents=True, exist_ok=True)
-        subprocess.check_call([
-            sys.executable,
-            "-m",
-            "pip",
-            "install",
-            "--no-cache-dir",
-            "--no-deps",
-            "--target",
-            install_dir,
-            RUSSIAN_STRESSER_PACKAGE,
-        ])
-        if install_dir not in sys.path:
-            sys.path.insert(0, install_dir)
-        importlib.invalidate_caches()
-        from russian_text_stresser.text_stresser import RussianTextStresser
-        return RussianTextStresser
-
 
 def add_russian_stress(text: str) -> str:
     """Add stress marks to Russian text."""
     try:
-        stresser = getattr(_russian_stresser_local, "instance", None)
-        if stresser is None:
-            with _russian_stresser_lock:
-                RussianTextStresser = _load_russian_stresser_class()
-                stresser = RussianTextStresser()
-                _russian_stresser_local.instance = stresser
-
+        stresser = RussianTextStresser()
         return stresser.stress_text(text)
     except Exception as exc:
         raise RuntimeError("Russian stress labeling failed") from exc
@@ -185,6 +143,7 @@ class MTLTokenizer:
         self.cangjie_converter = None
         self.cangjie_converter_lock = threading.Lock()
         self.check_vocabset_sot_eot()
+        self.stresser = RussianTextStresser()
 
     def get_cangjie_converter(self) -> ChineseCangjieConverter:
         if self.cangjie_converter is None:
@@ -197,7 +156,14 @@ class MTLTokenizer:
         voc = self.tokenizer.get_vocab()
         assert SOT in voc
         assert EOT in voc
-
+        
+    def get_russian_stress(self, text: str) -> str:
+        """Add stress marks to Russian text."""
+        try:
+            return self.stresser.stress_text(text)
+        except Exception as exc:
+            raise RuntimeError("Russian stress labeling failed") from exc
+            
     def preprocess_text(
         self,
         raw_text: str,
@@ -211,7 +177,7 @@ class MTLTokenizer:
         if language_id == "zh":
             preprocessed_text = self.get_cangjie_converter()(preprocessed_text)
         elif language_id == "ru":
-            preprocessed_text = add_russian_stress(preprocessed_text)
+            preprocessed_text = self.get_russian_stress(preprocessed_text)
 
         if "NFKD" in self.text_preproc:
             preprocessed_text = normalize("NFKD", preprocessed_text)
