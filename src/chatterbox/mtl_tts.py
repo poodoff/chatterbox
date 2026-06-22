@@ -1,8 +1,11 @@
 from dataclasses import dataclass
 from pathlib import Path
+import logging
 import os
+import threading
 
 import librosa
+import numpy as np
 import torch
 import perth
 import torch.nn.functional as F
@@ -18,6 +21,7 @@ from .models.voice_encoder import VoiceEncoder
 from .models.t3.modules.cond_enc import T3Cond
 
 
+
 REPO_ID = "ResembleAI/chatterbox"
 DEFAULT_MULTILINGUAL_T3_MODEL = "t3_mtl23ls_v2.safetensors"
 MULTILINGUAL_T3_MODELS = {
@@ -26,6 +30,10 @@ MULTILINGUAL_T3_MODELS = {
     "v3": "t3_mtl23ls_v3.safetensors",
     "t3_mtl23ls_v3": "t3_mtl23ls_v3.safetensors",
 }
+
+logger = logging.getLogger(__name__)
+_reference_vad_model = None
+_reference_vad_lock = threading.Lock()
 
 # Supported languages for the multilingual model
 SUPPORTED_LANGUAGES = {
@@ -109,6 +117,73 @@ def punc_norm(text: str) -> str:
 
     return text
 
+def prepare_reference_audio(
+    wav: np.ndarray,
+    sample_rate: int,
+    max_duration_s: float = 6.0,
+    speech_pad_ms: int = 100,
+    fade_ms: int = 10,
+) -> np.ndarray:
+    """Keep up to `max_duration_s` of detected speech for model conditioning."""
+    wav = np.asarray(wav, dtype=np.float32).reshape(-1)
+    max_samples = int(max_duration_s * sample_rate)
+    fallback = wav[:max_samples].copy()
+
+    try:
+        from silero_vad import get_speech_timestamps, load_silero_vad
+
+        vad_sample_rate = 16_000
+        vad_wav = wav
+        if sample_rate != vad_sample_rate:
+            vad_wav = librosa.resample(wav, orig_sr=sample_rate, target_sr=vad_sample_rate)
+        vad_wav = np.asarray(vad_wav, dtype=np.float32)
+
+        global _reference_vad_model
+        with _reference_vad_lock:
+            if _reference_vad_model is None:
+                _reference_vad_model = load_silero_vad()
+            timestamps = get_speech_timestamps(
+                torch.from_numpy(vad_wav),
+                _reference_vad_model,
+                sampling_rate=vad_sample_rate,
+                speech_pad_ms=0,
+            )
+
+        pad_samples = int(speech_pad_ms * sample_rate / 1000)
+        intervals = []
+        for timestamp in timestamps:
+            start = max(0, int(timestamp["start"] * sample_rate / vad_sample_rate) - pad_samples)
+            end = min(len(wav), int(timestamp["end"] * sample_rate / vad_sample_rate) + pad_samples)
+            if end <= start:
+                continue
+            if intervals and start <= intervals[-1][1]:
+                intervals[-1] = (intervals[-1][0], max(intervals[-1][1], end))
+            else:
+                intervals.append((start, end))
+
+        segments = []
+        remaining = max_samples
+        for start, end in intervals:
+            segment = wav[start:end]
+            segments.append(segment[:remaining])
+            remaining -= min(len(segment), remaining)
+            if remaining <= 0:
+                break
+
+        if segments:
+            fallback = np.concatenate(segments)
+        else:
+            logger.warning("No speech detected in reference audio; using its untrimmed prefix")
+    except Exception:
+        logger.warning("Reference VAD failed; using the untrimmed reference prefix", exc_info=True)
+
+    fade_samples = min(int(fade_ms * sample_rate / 1000), len(fallback) // 2)
+    if fade_samples > 0:
+        fade_in = np.linspace(0.0, 1.0, fade_samples, dtype=np.float32)
+        fallback[:fade_samples] *= fade_in
+        fallback[-fade_samples:] *= fade_in[::-1]
+    return np.ascontiguousarray(fallback, dtype=np.float32)
+
 
 @dataclass
 class Conditionals:
@@ -154,7 +229,7 @@ class Conditionals:
 
 class ChatterboxMultilingualTTS:
     ENC_COND_LEN = 6 * S3_SR
-    DEC_COND_LEN = 10 * S3GEN_SR
+    REF_COND_DURATION_S = 6
 
     def __init__(
         self,
@@ -256,7 +331,11 @@ class ChatterboxMultilingualTTS:
 
         ref_16k_wav = librosa.resample(s3gen_ref_wav, orig_sr=S3GEN_SR, target_sr=S3_SR)
 
-        s3gen_ref_wav = s3gen_ref_wav[:self.DEC_COND_LEN]
+        s3gen_ref_wav = prepare_reference_audio(
+            s3gen_ref_wav,
+            S3GEN_SR,
+            max_duration_s=self.REF_COND_DURATION_S,
+        )
         s3gen_ref_dict = self.s3gen.embed_ref(s3gen_ref_wav, S3GEN_SR, device=self.device)
 
         # Speech cond prompt tokens
