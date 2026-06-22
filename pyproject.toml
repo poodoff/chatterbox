@@ -28,7 +28,17 @@ dependencies = [
     "pykakasi==2.3.0",
     "gradio==6.8.0",
     "pyloudnorm",
-    "omegaconf"
+    "omegaconf",
+
+    # Runtime dependencies for russian-text-stresser. The package itself is
+    # installed without its incompatible spaCy 3.6 pin on the first Russian request.
+    "beautifulsoup4>=4.11.1",
+    "lxml>=4.9.1",
+    "pymorphy2>=0.9.1",
+    "pymorphy2-dicts-ru>=2.4.417127.4579844",
+    "spacy==3.8.11",
+    "stressed-cyrillic-tools>=0.1.10",
+    "transliterate>=1.10.2"
 ]
 
 [project.urls]
