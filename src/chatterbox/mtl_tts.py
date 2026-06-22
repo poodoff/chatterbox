@@ -282,7 +282,7 @@ class ChatterboxMultilingualTTS:
         t3_cfg = T3ConfigMultilingual()
         t3_cfg.text_tokens_dict_size = T3_TEXT_VOCAB_SIZE
         t3 = T3(t3_cfg)
-        t3_state = load_safetensors(ckpt_dir / t3_filename)
+        t3_state = load_safetensors(ckpt_dir / t3_model )
         if "model" in t3_state.keys():
             t3_state = t3_state["model"][0]
         t3.load_state_dict(t3_state)
