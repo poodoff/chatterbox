@@ -296,7 +296,7 @@ class ChatterboxMultilingualTTS:
         ###
 
         tokenizer = MTLTokenizer(
-            str(ckpt_dir / TOKENIZER_FILENAME),
+            str(ckpt_dir / "grapheme_mtl_merged_expanded_v1.json"),
             text_preproc=t3_cfg.text_preproc,
         )
 
